@@ -92,7 +92,7 @@ Create or edit the `config.json` file in the project root with the following str
 2025/07/07 22:00:00 Found 3 devices to back up.
 2025/07/07 22:00:00 Starting 5 workers...
 2025/07/07 22:00:01 Worker 1: processing device BR_RS_POA_3F_2C_RB01...
-2025/07/07 22:00:10 Backup for POP-SantaClara completed successfully! Saved to: ./backups/BR_RS_POA_3F_2C_RB01_2025-07-07_22-00-10.rsc
+2025/07/07 22:00:10 Backup for BR_RS_POA_3F_2C_RB01 completed successfully! Saved to: ./backups/BR_RS_POA_3F_2C_RB01_2025-07-07_22-00-10.rsc
 ```
 
 ---
