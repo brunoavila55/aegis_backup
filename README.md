@@ -1,4 +1,4 @@
-# 🛡️ Aegis Backup — v0.2
+# 🛡️ Aegis Backup — v0.3
 
 **Aegis Backup** is a lightweight, concurrent, configuration-driven backup tool for MikroTik routers.  
 Written in Go, it connects to your devices over SSH, exports their configurations, and saves them as timestamped `.rsc` files.  
@@ -7,7 +7,7 @@ Written in Go, it connects to your devices over SSH, exports their configuration
 
 ---
 
-## 🚀 What’s New in v0.2
+## 🚀 What’s New in v0.3
 
 ✅  Flexible Configuration: Set the config file path via the `-config` flag or a `CONFIG_PATH` environment variable.  
 ✅ Smarter Defaults: If `backup_dir` is not set in your config, it now defaults automatically to `./backups`. 
