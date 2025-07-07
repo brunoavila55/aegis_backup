@@ -9,7 +9,7 @@ Written in Go, it connects to your devices over SSH, exports their configuration
 
 ## 🚀 What’s New in v0.3
 
-✅  Flexible Configuration: Set the config file path via the `-config` flag or a `CONFIG_PATH` environment variable.  
+✅ Flexible Configuration: Set the config file path via the `-config` flag or a `CONFIG_PATH` environment variable.  
 ✅ Smarter Defaults: If `backup_dir` is not set in your config, it now defaults automatically to `./backups`. 
 ✅ Connection Timeout: Added a 15-second timeout for SSH connections to prevent hangs with unresponsive devices.  
 ✅ Better Error Messages: Now provides clearer feedback on permission issues if a backup fails to export data.  
