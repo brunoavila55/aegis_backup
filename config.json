@@ -1,0 +1,11 @@
+{
+    "backup_dir": "backups_mikrotik",
+    "devices": [
+        {
+            "name": "Mikrotik 01",
+            "address": "192.168.88.1",
+            "username": "admin",
+            "password": "password"
+        }
+    ]
+}
