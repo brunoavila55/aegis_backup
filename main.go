@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -49,24 +49,26 @@ func loadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-// backupMikroTik connects to a device via SSH and performs a backup.
+// backupMikroTik connects to a device via SSH and performs a configuration export.
 func backupMikroTik(device Device, backupDir string) error {
 	log.Printf("Starting SSH backup for device: %s (%s)", device.Name, device.Address)
 
-	// Set up SSH client configuration.
 	sshConfig := &ssh.ClientConfig{
 		User: device.Username,
 		Auth: []ssh.AuthMethod{
 			ssh.Password(device.Password),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Note: Ignores host key verification. Fine for internal networks, but consider using a known_hosts file for production.
+		// WARNING: In a production environment, avoid ignoring the host key.
+		// Consider using a known_hosts file for better security.
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         15 * time.Second,
 	}
 
-	// Ensure SSH port (22) is included if not specified in the address.
+	// Ensure the address has a port, defaulting to 22 if missing.
+	// This is more robust than string checking, especially for IPv6.
 	address := device.Address
-	if !strings.Contains(address, ":") {
-		address = address + ":22"
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		address = net.JoinHostPort(address, "22")
 	}
 
 	// Connect to the SSH server.
@@ -76,7 +78,7 @@ func backupMikroTik(device Device, backupDir string) error {
 	}
 	defer client.Close()
 
-	log.Printf("Successfully connected to %s via SSH. Exporting configuration...", device.Name)
+	log.Printf("Successfully connected to %s. Exporting configuration...", device.Name)
 
 	// Create a new SSH session.
 	session, err := client.NewSession()
@@ -94,20 +96,20 @@ func backupMikroTik(device Device, backupDir string) error {
 		return fmt.Errorf("failed to run /export command on %s: %w", device.Name, err)
 	}
 
-	configContent := stdoutBuf.String()
+	configContent := stdoutBuf.Bytes()
 
 	// Check if the output is empty.
-	if configContent == "" {
-		return fmt.Errorf("no configuration data returned from /export for %s. Check user permissions and RouterOS version", device.Name)
+	if len(configContent) == 0 {
+		return fmt.Errorf("no configuration data returned from %s; check user permissions", device.Name)
 	}
 
-	// Generate backup filename with timestamp.
+	// Generate a backup filename with a timestamp.
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("%s_%s.txt", device.Name, timestamp)
+	fileName := fmt.Sprintf("%s_%s.rsc", device.Name, timestamp) // Using .rsc extension for RouterOS scripts
 	filePath := filepath.Join(backupDir, fileName)
 
 	// Save the configuration to a file.
-	if err := os.WriteFile(filePath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(filePath, configContent, 0644); err != nil {
 		return fmt.Errorf("failed to save backup file for %s: %w", device.Name, err)
 	}
 
@@ -115,35 +117,61 @@ func backupMikroTik(device Device, backupDir string) error {
 	return nil
 }
 
-func main() {
-	log.Println("Starting MikroTik Backup Application (via SSH)...")
+// worker represents a concurrent worker that processes backup jobs from a channel.
+func worker(id int, wg *sync.WaitGroup, devices <-chan Device, backupDir string) {
+	defer wg.Done()
 
-	// Load configuration from file.
+	for d := range devices {
+		log.Printf("Worker %d: processing device %s...", id, d.Name)
+		if err := backupMikroTik(d, backupDir); err != nil {
+			// Log errors but continue processing other devices.
+			log.Printf("ERROR backing up %s (Worker %d): %v", d.Name, id, err)
+		}
+	}
+	log.Printf("Worker %d finished.", id)
+}
+
+func main() {
+	log.Println("Starting MikroTik Backup application...")
+
 	config, err := loadConfig("config.json")
 	if err != nil {
-		log.Fatalf("Fatal error loading config: %v", err)
+		log.Fatalf("Fatal error loading configuration: %v", err)
 	}
 
-	// Create backup directory if it doesn't exist.
-	if err := os.MkdirAll(config.BackupDir, os.ModePerm); err != nil {
-		log.Fatalf("Failed to create backup directory '%s': %v", config.BackupDir, err)
+	// Create the backup directory with standard permissions (0755).
+	if err := os.MkdirAll(config.BackupDir, 0755); err != nil {
+		log.Fatalf("Could not create backup directory '%s': %v", config.BackupDir, err)
 	}
 
 	log.Printf("Found %d devices to back up.", len(config.Devices))
 
-	// Run backups concurrently for each device.
+	// Defines the number of concurrent backup jobs.
+	// This can be tuned based on system resources and network capacity.
+	const numWorkers = 5
+
+	// Create a buffered channel to distribute devices to workers.
+	devicesChan := make(chan Device, len(config.Devices))
 	var wg sync.WaitGroup
-	for _, device := range config.Devices {
+
+	// Start worker goroutines.
+	log.Printf("Starting %d workers...", numWorkers)
+	for i := 1; i <= numWorkers; i++ {
 		wg.Add(1)
-		go func(d Device) {
-			defer wg.Done()
-			if err := backupMikroTik(d, config.BackupDir); err != nil {
-				log.Printf("Backup error for %s: %v", d.Name, err)
-			}
-		}(device)
+		go worker(i, &wg, devicesChan, config.BackupDir)
 	}
 
-	// Wait for all backups to complete.
+	// Distribute jobs to the workers.
+	log.Println("Distributing devices to workers...")
+	for _, device := range config.Devices {
+		devicesChan <- device
+	}
+
+	// Close the channel to signal that no more jobs will be sent.
+	close(devicesChan)
+
+	// Wait for all workers to complete their jobs.
+	log.Println("Waiting for all workers to finish...")
 	wg.Wait()
 
 	log.Println("Backup process completed.")
