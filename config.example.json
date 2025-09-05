@@ -7,8 +7,8 @@
     },
     "telegram": {
         "enabled": false,
-        "bot_token": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-        "chat_id": "-1001234567890",
+        "bot_token": "YOUR_BOT_TOKEN",
+        "chat_id": "YOUR_ID_CHAT",
         "send_zip": true,
         "send_logs": true
     },
