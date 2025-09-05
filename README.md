@@ -193,8 +193,8 @@ After=network.target
 [Service]
 Type=simple
 User=aegis
-WorkingDirectory=/opt/aegis-backup
-ExecStart=/opt/aegis-backup/aegis-backup -daemon
+WorkingDirectory=/opt/aegis_backup
+ExecStart=/opt/aegis_backup/aegis-backup -daemon
 Restart=always
 RestartSec=10
 
