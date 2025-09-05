@@ -32,12 +32,19 @@ type TelegramConfig struct {
 	SendLogs  bool   `json:"send_logs"`  // Whether to send backup completion notifications
 }
 
+// BackupRetention represents the backup retention policy
+type BackupRetention struct {
+	Enabled  bool `json:"enabled"`
+	KeepDays int  `json:"keep_days"`
+}
+
 // Config represents the structure of the main configuration file (e.g., config.json).
 type Config struct {
-	Devices   []Device
-	BackupDir string         `json:"backup_dir"`
-	Schedule  ScheduleConfig `json:"schedule"`
-	Telegram  TelegramConfig `json:"telegram"`
+	Devices         []Device
+	BackupDir       string          `json:"backup_dir"`
+	Schedule        ScheduleConfig  `json:"schedule"`
+	Telegram        TelegramConfig  `json:"telegram"`
+	BackupRetention BackupRetention `json:"backup_retention"`
 }
 
 // LoadConfig reads and parses the JSON configuration from the given file path.

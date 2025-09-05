@@ -11,5 +11,9 @@
         "chat_id": "-1001234567890",
         "send_zip": true,
         "send_logs": true
+    },
+    "backup_retention": {
+        "enabled": true,
+        "keep_days": 30
     }
 }

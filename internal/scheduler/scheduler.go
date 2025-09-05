@@ -173,9 +173,9 @@ func (s *Scheduler) postBackupOperations(backupTime time.Time, duration time.Dur
 		}
 	}
 
-	// Cleanup old ZIP files (keep last 30 days)
-	if zipPath != "" {
-		if err := archiver.CleanupOldZips(s.config.BackupDir, 30); err != nil {
+	// Cleanup old ZIP files
+	if s.config.BackupRetention.Enabled {
+		if err := archiver.CleanupOldZips(s.config.BackupDir, s.config.BackupRetention.KeepDays); err != nil {
 			log.Printf("Warning: Failed to cleanup old ZIP files: %v", err)
 		}
 	}
