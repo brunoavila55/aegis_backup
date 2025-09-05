@@ -6,9 +6,9 @@
         "timezone": "America/Sao_Paulo"
     },
     "telegram": {
-        "enabled": true,
-        "bot_token": "YOUR_BOT_TOKEN_HERE",
-        "chat_id": "YOUR_CHAT_ID_HERE",
+        "enabled": false,
+        "bot_token": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+        "chat_id": "-1001234567890",
         "send_zip": true,
         "send_logs": true
     }

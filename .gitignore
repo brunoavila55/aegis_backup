@@ -1,0 +1,54 @@
+# Binaries
+aegis-backup
+aegis-backup.exe
+aegis_backup
+aegis_backup.exe
+backup-app.exe
+
+# Backup files
+backups_mikrotik/
+backups/
+*.rsc
+*.backup
+*.zip
+
+# Configuration with sensitive data
+config.json
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
