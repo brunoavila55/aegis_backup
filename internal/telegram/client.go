@@ -17,6 +17,7 @@ type Client struct {
 	botToken string
 	chatID   string
 	baseURL  string
+	client   *http.Client
 }
 
 // NewClient creates a new Telegram client
@@ -25,6 +26,14 @@ func NewClient(botToken, chatID string) *Client {
 		botToken: botToken,
 		chatID:   chatID,
 		baseURL:  fmt.Sprintf("https://api.telegram.org/bot%s", botToken),
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:       10,
+				IdleConnTimeout:    30 * time.Second,
+				DisableCompression: true,
+			},
+		},
 	}
 }
 
@@ -43,7 +52,7 @@ func (c *Client) SendMessage(message string) error {
 		return fmt.Errorf("failed to marshal message payload: %w", err)
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	resp, err := c.client.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -112,8 +121,7 @@ func (c *Client) SendDocument(filePath, caption string) error {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	// Send request
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send document: %w", err)
 	}
@@ -131,7 +139,7 @@ func (c *Client) SendDocument(filePath, caption string) error {
 func (c *Client) TestConnection() error {
 	url := fmt.Sprintf("%s/getMe", c.baseURL)
 
-	resp, err := http.Get(url)
+	resp, err := c.client.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to test connection: %w", err)
 	}
@@ -146,32 +154,50 @@ func (c *Client) TestConnection() error {
 }
 
 // FormatBackupSummary creates a formatted message for backup completion
-func FormatBackupSummary(deviceCount int, duration time.Duration, zipFile string) string {
+func FormatBackupSummary(deviceCount int, duration time.Duration, zipFile string, timezone string) string {
+	// Parse timezone
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		location = time.UTC
+	}
+
+	currentTime := time.Now().In(location)
+
 	return fmt.Sprintf(`🛡️ <b>Aegis Backup Completed</b>
 
 📊 <b>Summary:</b>
 • Devices backed up: %d
 • Duration: %v
 • ZIP file: %s
-• Date: %s
+• Date: %s (%s)
 
 ✅ All configurations have been successfully backed up and compressed.`,
 		deviceCount,
 		duration,
 		filepath.Base(zipFile),
-		time.Now().Format("2006-01-02 15:04:05"))
+		currentTime.Format("2006-01-02 15:04:05"),
+		timezone)
 }
 
 // FormatErrorMessage creates a formatted error message
-func FormatErrorMessage(operation string, err error) string {
+func FormatErrorMessage(operation string, err error, timezone string) string {
+	// Parse timezone
+	location, parseErr := time.LoadLocation(timezone)
+	if parseErr != nil {
+		location = time.UTC
+	}
+
+	currentTime := time.Now().In(location)
+
 	return fmt.Sprintf(`❌ <b>Aegis Backup Error</b>
 
 🔧 <b>Operation:</b> %s
 ⚠️ <b>Error:</b> %s
-📅 <b>Time:</b> %s
+📅 <b>Time:</b> %s (%s)
 
 Please check the logs for more details.`,
 		operation,
 		err.Error(),
-		time.Now().Format("2006-01-02 15:04:05"))
+		currentTime.Format("2006-01-02 15:04:05"),
+		timezone)
 }

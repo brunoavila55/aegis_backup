@@ -10,19 +10,20 @@ import (
 	"time"
 
 	"aegis_backup/internal/config"
+	"aegis_backup/internal/monitoring"
 
 	"golang.org/x/crypto/ssh"
 )
 
 // Execute connects to a device via SSH and performs a configuration backup.
 // It runs the "/export" command and saves the output to a file in the specified backup directory.
-func Execute(device config.Device, backupDir string) error {
+func Execute(device config.Device, backupDir string, metrics *monitoring.MetricsCollector, alertManager *monitoring.AlertManager) error {
+	startTime := time.Now()
 	log.Printf("Starting SSH backup for device: %s (%s)", device.Name, device.Address)
 
-	// Configure the SSH client.
-	// WARNING: InsecureIgnoreHostKey is used, which makes the connection vulnerable to
-	// man-in-the-middle attacks. This should only be used in trusted environments.
-	// For production, consider using a proper host key verification mechanism.
+	// Configure the SSH client
+	// Note: Using InsecureIgnoreHostKey for simplicity in controlled environments
+	// For production with untrusted networks, consider implementing proper host key verification
 	sshConfig := &ssh.ClientConfig{
 		User: device.Username,
 		Auth: []ssh.AuthMethod{
@@ -41,6 +42,16 @@ func Execute(device config.Device, backupDir string) error {
 	// Dial the SSH server.
 	client, err := ssh.Dial("tcp", address, sshConfig)
 	if err != nil {
+		// Record failure metrics
+		if metrics != nil {
+			metrics.RecordBackupFailure(device.Name, err)
+		}
+
+		// Check for alerts
+		if alertManager != nil {
+			alertManager.CheckAlerts(device.Name)
+		}
+
 		return fmt.Errorf("failed to connect via SSH to %s: %w", device.Name, err)
 	}
 	defer client.Close()
@@ -74,11 +85,29 @@ func Execute(device config.Device, backupDir string) error {
 	fileName := fmt.Sprintf("%s_%s.rsc", device.Name, timestamp)
 	filePath := filepath.Join(backupDir, fileName)
 
-	// Write the configuration data to the backup file.
-	if err := os.WriteFile(filePath, configContent, 0644); err != nil {
+	// Write the configuration data to the backup file with restricted permissions.
+	if err := os.WriteFile(filePath, configContent, 0600); err != nil {
 		return fmt.Errorf("failed to save backup file for %s: %w", device.Name, err)
 	}
 
-	log.Printf("Backup for %s completed successfully! Saved to: %s", device.Name, filePath)
+	duration := time.Since(startTime)
+	fileInfo, _ := os.Stat(filePath)
+	fileSize := int64(0)
+	if fileInfo != nil {
+		fileSize = fileInfo.Size()
+	}
+
+	// Record success metrics
+	if metrics != nil {
+		metrics.RecordBackupSuccess(device.Name, duration, fileSize)
+	}
+
+	// Check for alerts
+	if alertManager != nil {
+		alertManager.CheckAlerts(device.Name)
+	}
+
+	log.Printf("Backup for %s completed successfully! Saved to: %s (took %v, size: %d bytes)",
+		device.Name, filePath, duration, fileSize)
 	return nil
 }

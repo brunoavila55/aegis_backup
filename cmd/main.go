@@ -9,21 +9,36 @@ import (
 	"syscall"
 	"time"
 
+	"aegis_backup/internal/api"
 	"aegis_backup/internal/archiver"
 	"aegis_backup/internal/config"
+	"aegis_backup/internal/monitoring"
 	"aegis_backup/internal/scheduler"
 	"aegis_backup/internal/telegram"
 	"aegis_backup/internal/worker"
 )
 
-// The number of concurrent workers for processing backups.
-const numWorkers = 5
+// calculateWorkers calculates the optimal number of workers based on device count
+func calculateWorkers(deviceCount int) int {
+	if deviceCount <= 0 {
+		return 1
+	}
+	if deviceCount <= 5 {
+		return deviceCount
+	}
+	if deviceCount <= 10 {
+		return 5
+	}
+	// For more than 10 devices, use 8 workers max to avoid overwhelming the system
+	return 8
+}
 
 func main() {
 	// Define and parse the command-line flags
 	configPath := flag.String("config", "config.json", "Path to the configuration file (e.g., config.json)")
 	devicesPath := flag.String("devices", "devices.csv", "Path to the devices CSV file (e.g., devices.csv)")
 	daemon := flag.Bool("daemon", false, "Run as daemon service with scheduler")
+	apiPort := flag.Int("api-port", 8080, "Port for the monitoring API server")
 	flag.Parse()
 
 	// If the config flag was not set, check for an environment variable as a fallback.
@@ -46,23 +61,60 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error loading devices from CSV: %v", err)
 	}
+
+	// Validate devices configuration
+	if len(devices) == 0 {
+		log.Fatalf("No devices found in CSV file: %s", *devicesPath)
+	}
+
+	// Validate each device
+	for i, device := range devices {
+		if device.Name == "" {
+			log.Fatalf("Device %d: name is required", i+1)
+		}
+		if device.Address == "" {
+			log.Fatalf("Device %d (%s): address is required", i+1, device.Name)
+		}
+		if device.Username == "" {
+			log.Fatalf("Device %d (%s): username is required", i+1, device.Name)
+		}
+		if device.Password == "" {
+			log.Fatalf("Device %d (%s): password is required", i+1, device.Name)
+		}
+	}
+
+	log.Printf("Loaded %d devices for backup", len(devices))
 	conf.Devices = devices
 
 	// Ensure the backup directory exists before starting the backup process.
-	if err := os.MkdirAll(conf.BackupDir, 0755); err != nil {
+	if err := os.MkdirAll(conf.BackupDir, 0700); err != nil {
 		log.Fatalf("Failed to create backup directory: %v", err)
 	}
 
+	// Initialize monitoring system
+	metrics := monitoring.NewMetricsCollector()
+	alertManager := monitoring.NewAlertManager(metrics)
+
+	// Start API server in background
+	go func() {
+		apiServer := api.NewServer(metrics, alertManager, *apiPort)
+		if err := apiServer.Start(); err != nil {
+			log.Printf("API server error: %v", err)
+		}
+	}()
+
+	log.Printf("Monitoring API available at http://localhost:%d", *apiPort)
+
 	// Determine the execution mode
 	if *daemon {
-		runDaemonMode(conf)
+		runDaemonMode(conf, metrics, alertManager)
 	} else {
-		runOnceMode(conf)
+		runOnceMode(conf, metrics, alertManager)
 	}
 }
 
 // runOnceMode executes a single backup run and exits
-func runOnceMode(conf *config.Config) {
+func runOnceMode(conf *config.Config, metrics *monitoring.MetricsCollector, alertManager *monitoring.AlertManager) {
 	log.Println("Running backup once...")
 
 	start := time.Now()
@@ -71,8 +123,12 @@ func runOnceMode(conf *config.Config) {
 	devicesChan := make(chan config.Device, len(conf.Devices))
 	var wg sync.WaitGroup
 
+	// Calculate optimal number of workers
+	numWorkers := calculateWorkers(len(conf.Devices))
+	log.Printf("Starting backup with %d workers for %d devices", numWorkers, len(conf.Devices))
+
 	// Start the worker pool.
-	worker.StartPool(numWorkers, &wg, devicesChan, conf.BackupDir)
+	worker.StartPool(numWorkers, &wg, devicesChan, conf.BackupDir, metrics, alertManager)
 
 	// Add all devices from the configuration to the channel for processing.
 	for _, device := range conf.Devices {
@@ -91,11 +147,11 @@ func runOnceMode(conf *config.Config) {
 }
 
 // runDaemonMode runs the application as a daemon service with scheduler
-func runDaemonMode(conf *config.Config) {
+func runDaemonMode(conf *config.Config, metrics *monitoring.MetricsCollector, alertManager *monitoring.AlertManager) {
 	log.Println("Starting Aegis Backup daemon...")
 
 	// Create and start the scheduler
-	sched := scheduler.NewScheduler(conf)
+	sched := scheduler.NewScheduler(conf, metrics, alertManager)
 
 	if err := sched.Start(); err != nil {
 		log.Fatalf("Failed to start scheduler: %v", err)
@@ -136,6 +192,8 @@ func postBackupOperations(conf *config.Config, backupTime time.Time, duration ti
 		if zipErr != nil {
 			log.Printf("Failed to create ZIP file: %v", zipErr)
 			sendErrorNotification(conf, "ZIP Creation", zipErr)
+			// Continue execution even if ZIP creation fails
+			zipPath = ""
 		} else {
 			log.Printf("ZIP file created: %s", zipPath)
 		}
@@ -165,7 +223,7 @@ func postBackupOperations(conf *config.Config, backupTime time.Time, duration ti
 // sendBackupSummary sends a backup completion summary to Telegram
 func sendBackupSummary(conf *config.Config, deviceCount int, duration time.Duration, zipFile string) {
 	tgClient := telegram.NewClient(conf.Telegram.BotToken, conf.Telegram.ChatID)
-	message := telegram.FormatBackupSummary(deviceCount, duration, zipFile)
+	message := telegram.FormatBackupSummary(deviceCount, duration, zipFile, conf.Schedule.Timezone)
 
 	if err := tgClient.SendMessage(message); err != nil {
 		log.Printf("Failed to send backup summary to Telegram: %v", err)
@@ -196,7 +254,7 @@ func sendZipFile(conf *config.Config, zipPath string) {
 // sendErrorNotification sends an error notification to Telegram
 func sendErrorNotification(conf *config.Config, operation string, err error) {
 	tgClient := telegram.NewClient(conf.Telegram.BotToken, conf.Telegram.ChatID)
-	message := telegram.FormatErrorMessage(operation, err)
+	message := telegram.FormatErrorMessage(operation, err, conf.Schedule.Timezone)
 
 	if sendErr := tgClient.SendMessage(message); sendErr != nil {
 		log.Printf("Failed to send error notification to Telegram: %v", sendErr)
